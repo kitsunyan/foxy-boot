@@ -1,10 +1,10 @@
-# foxy-boot
+# Foxy Boot
 
 Android boot animation replacement which displays the kernel ring buffer.
 
 ## User Documentation
 
-foxy-boot is distributed as a Magisk module. User documentation is availble in [README](magisk/README.md) under `magisk`
+Foxy Boot is distributed as a Magisk module. User documentation is availble in [README](magisk/README.md) under `magisk`
 directory.
 
 ## Building and Installing

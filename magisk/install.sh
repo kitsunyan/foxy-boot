@@ -13,7 +13,7 @@ print_modname() {
 }
 
 on_install() {
-  ui_print "- Checking ABI compatibility"
+  ui_print "- Checking libc++ presence"
 
   [ -n "`find /system/lib* -name libc++.so`" ] ||
   abort "! Unable to find libc++.so!"
@@ -26,10 +26,6 @@ on_install() {
     x64) ABI=x86_64 ;;
   esac
 
-  local ABI_COMPAT_SET_LAYER=false
-  grep -q '_ZN7android14SurfaceControl8setLayerEi' /system/lib*/libgui.so &&
-  ABI_COMPAT_SET_LAYER=true
-
   ui_print "- Extracting module files"
 
   mkdir -p $MODPATH/system/bin
@@ -38,13 +34,6 @@ on_install() {
   [ -e $MODPATH/system/bin/bootanimation ] ||
   abort "! Unable to extract bootanimation!"
 
-  ui_print "- Applying ABI patches"
-
-  if $ABI_COMPAT_SET_LAYER; then
-    sed -i $MODPATH/system/bin/bootanimation \
-    -e 's/_ZN7android14SurfaceControl8setLayerEj/_ZN7android14SurfaceControl8setLayerEi/'
-  fi
-
   ui_print "- Checking the binary"
 
   chmod 755 $MODPATH/system/bin/bootanimation
@@ -52,7 +41,7 @@ on_install() {
   OUT="`$MODPATH/system/bin/bootanimation ldcheck 2>&1`"
   if [ $? -ne 0 ]; then
     for sym in `echo "$OUT" | grep -o '"[^"]*"' | grep -v '/'`; do
-      ui_print "cannot locate symbol $sym"
+      ui_print "cannot locate $sym"
     done
     abort '! Unable to link the executable!'
   fi

@@ -1,6 +1,8 @@
 #include "font.h"
 #include "surface.h"
 
+#include <dlfcn.h>
+
 #include <byteswap.h>
 #include <sys/klog.h>
 #include <stdlib.h>
@@ -51,13 +53,16 @@ static uint8_t * make_symbol(const struct font_t * font, uint8_t c, int scale,
 }
 
 static int check_exit(struct ctx_t * ctx) {
-	if (ctx->boot_test) {
-		return 0;
-	} else {
-		char value[PROPERTY_VALUE_MAX];
-		property_get("service.bootanim.exit", value, "0");
-		return atoi(value);
+	char value[PROPERTY_VALUE_MAX];
+	property_get("service.bootanim.exit", value, "0");
+	if (atoi(value) && !ctx->boot_test) {
+		return 1;
 	}
+	property_get("init.svc.surfaceflinger", value, "stopped");
+	if (strcmp(value, "running")) {
+		return 1;
+	}
+	return 0;
 }
 
 static void render_line(int line, const char * text, const struct font_t * font, uint8_t ** symbols, int scale) {
@@ -155,7 +160,7 @@ static void loop(struct surface_cb_t * surface_cb) {
 	max_lines = ctx->height / ctx->font->height / ctx->scale;
 	lines = malloc(max_lines * (max_line + 1));
 
-	while (!surface_exit_pending(surface_cb)) {
+	while (1) {
 		int count = klogctl(3, log, log_size);
 		int render;
 		i = count > 0 ? next_after_date_update(last_date, log, count) : -1;
@@ -197,7 +202,7 @@ static void loop(struct surface_cb_t * surface_cb) {
 		}
 		usleep(20000);
 		if (check_exit(ctx)) {
-			surface_exit(surface_cb);
+			break;
 		}
 	}
 
@@ -279,7 +284,7 @@ int main(int argc, char ** argv) {
 			};
 			ctx.font = get_font();
 			ctx.boot_test = argc >= 2 && !strcmp(argv[1], "test");
-			surface_run(&surface_cb);
+			return surface_run(&surface_cb);
 		}
 		return 0;
 	}

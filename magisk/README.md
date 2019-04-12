@@ -1,4 +1,4 @@
-# foxy-boot
+# Foxy Boot
 
 Android boot animation replacement which displays the kernel ring buffer.
 
@@ -6,7 +6,7 @@ Android boot animation replacement which displays the kernel ring buffer.
 
 ## Configuration
 
-foxy-boot uses black background color and white foreground color by default. The font scale is dependent on display DPI.
+Foxy Boot uses black background color and white foreground color by default. The font scale is dependent on display DPI.
 These values can be changed using the following system properties:
 
 * `foxy.boot.scale` — scale factor, can take integer values from 1 to 9
@@ -25,7 +25,7 @@ resetprop 'foxy.boot.foreground' '#000000'
 
 ## ABI and Linking Issues
 
-foxy-boot works with private Android API which is not available in NDK. It's dynamically linked against stub libraries
+Foxy Boot works with private Android API which is not available in NDK. It's dynamically linked against stub libraries
 which should resemble the real libraries in the system, however successful linking and full ABI compatibility on the
 real Android system cannot be guaranteed.
 
@@ -36,6 +36,6 @@ so they could be reported at my [GitHub repo](https://github.com/kitsunyan/foxy-
 
 ## License
 
-foxy-boot is available under the terms of GNU General Public License v3 or later.
+Foxy Boot is available under the terms of GNU General Public License v3 or later. Copyright (C) 2019 kitsunyan.
 
 The program is partially based on `bootanimation` from the AOSP. Copyright (C) 2007 The Android Open Source Project.

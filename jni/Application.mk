@@ -1,2 +1,2 @@
-APP_PLATFORM := android-24
+APP_PLATFORM := android-19
 APP_STL := c++_shared

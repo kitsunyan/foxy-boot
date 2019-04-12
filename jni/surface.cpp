@@ -1,89 +1,73 @@
 #include "surface.h"
 
+#include <dlfcn.h>
 #include <sys/resource.h>
 #include <android/gui.h>
-#include <unistd.h>
+#include <stdio.h>
 
-class SurfaceThread: public android::Thread, public android::IBinder::DeathRecipient {
-public:
-	SurfaceThread(surface_cb_t * surface_cb): android::Thread(false), surfaceCallbacks(surface_cb),
-		client(new android::SurfaceComposerClient()) {
-		surface_cb->priv = this;
-	}
+typedef void (* set_layer_t)(android::SurfaceControl *, uint32_t);
+typedef android::sp<android::SurfaceControl> (* create_surface_t)(android::SurfaceComposerClient *,
+	android::String8 const &, uint32_t, uint32_t, int32_t, uint32_t, android::SurfaceControl *, uint32_t, uint32_t);
 
-	inline bool exitPendingPublic() {
-		return exitPending();
-	}
-
-private:
-	surface_cb_t * surfaceCallbacks;
-
-	android::sp<android::SurfaceComposerClient> client;
-	android::sp<android::SurfaceControl> control;
-	android::sp<android::Surface> surface;
-
-	virtual void onFirstRef() {
-		android::status_t err = client->linkToComposerDeath(this);
-		if (err == android::NO_ERROR) {
-			run("SurfaceThread", android::PRIORITY_DISPLAY);
+static void * find_symbol(void * object, const char * name, const char ** symbols) {
+	while (*symbols) {
+		void * symbol = dlsym(object, *symbols);
+		if (symbol) {
+			return symbol;
 		}
+		symbols++;
+	}
+	fprintf(stderr, "\"%s\" is not available\n", name);
+	return nullptr;
+}
+
+int surface_run(surface_cb_t * surface_cb) {
+	void * gui = dlopen("libgui.so", RTLD_LAZY);
+	if (!gui) {
+		fprintf(stderr, "dlopen failed\n");
+		return 1;
+	}
+	const char * set_layer_symbols[3] = {
+		"_ZN7android14SurfaceControl8setLayerEj",
+		"_ZN7android14SurfaceControl8setLayerEi",
+		nullptr
+	};
+	set_layer_t set_layer = reinterpret_cast<set_layer_t>(find_symbol(gui,
+		"android::SurfaceControl::setLayer", set_layer_symbols));
+	const char * create_surface_symbols[3] = {
+		"_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijPNS_14SurfaceControlEjj",
+		"_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8Ejjij",
+		nullptr
+	};
+	create_surface_t create_surface = reinterpret_cast<create_surface_t>(find_symbol(gui,
+		"android::SurfaceComposerClient::createSurface", create_surface_symbols));
+	if (!set_layer || !create_surface) {
+		return 1;
 	}
 
-	virtual void binderDied(const android::wp<android::IBinder> & who) {
-		kill(getpid(), SIGKILL);
-		requestExit();
-	}
-
-	virtual android::status_t readyToRun() {
-		android::sp<android::IBinder> dtoken(android::SurfaceComposerClient::
-			getBuiltInDisplay(android::ISurfaceComposer::eDisplayIdMain));
-		android::DisplayInfo dinfo;
-		android::status_t status = android::SurfaceComposerClient::getDisplayInfo(dtoken, &dinfo);
-		if (status != android::NO_ERROR) {
-			return android::PERMISSION_DENIED;
-		}
-
-		android::sp<android::SurfaceControl> control = client->createSurface(android::String8("SurfaceThread"),
-			dinfo.w, dinfo.h, android::PIXEL_FORMAT_RGBA_8888);
+	int ref = 0;
+	setpriority(PRIO_PROCESS, 0, android::PRIORITY_DISPLAY);
+	android::SurfaceComposerClient * client = new android::SurfaceComposerClient();
+	client->incStrong(&ref);
+	android::sp<android::IBinder> dtoken(android::SurfaceComposerClient::getBuiltInDisplay(0));
+	android::DisplayInfo dinfo;
+	android::status_t status = android::SurfaceComposerClient::getDisplayInfo(dtoken, &dinfo);
+	bool success = false;
+	if (status == android::NO_ERROR) {
+		android::SurfaceControl * control = create_surface(client,
+			android::String8("SurfaceThread"), dinfo.w, dinfo.h, 1, 0, nullptr, -1, -1).get();
 
 		android::SurfaceComposerClient::openGlobalTransaction();
-		control->setLayer(0x40000000);
+		set_layer(control, 0x40000000);
 		android::SurfaceComposerClient::closeGlobalTransaction();
 
-		android::sp<android::Surface> surface = control->getSurface();
-		if (!surfaceCallbacks->gl_prepare(surfaceCallbacks, surface.get(), dinfo.density)) {
-			return android::NO_INIT;
+		android::Surface * surface = control->getSurface().get();
+		if (surface_cb->gl_prepare(surface_cb, surface, dinfo.density)) {
+			surface_cb->gl_loop(surface_cb);
+			success = true;
 		}
-
-		SurfaceThread::control = control;
-		SurfaceThread::surface = surface;
-		return android::NO_ERROR;
 	}
-
-	virtual bool threadLoop() {
-		surfaceCallbacks->gl_loop(surfaceCallbacks);
-		surface.clear();
-		control.clear();
-		android::IPCThreadState::self()->stopProcess();
-		return false;
-	}
-};
-
-void surface_run(surface_cb_t * surface_cb) {
-	setpriority(PRIO_PROCESS, 0, android::PRIORITY_DISPLAY);
-	android::sp<android::ProcessState> proc(android::ProcessState::self());
-	proc->startThreadPool();
-	android::sp<SurfaceThread> thread(new SurfaceThread(surface_cb));
-	android::IPCThreadState::self()->joinThreadPool();
+	client->decStrong(&ref);
 	setpriority(PRIO_PROCESS, 0, android::PRIORITY_DEFAULT);
-}
-
-int surface_exit_pending(struct surface_cb_t * surface_cb) {
-	SurfaceThread * surfaceThread = (SurfaceThread *) surface_cb->priv;
-	return surfaceThread->exitPendingPublic();
-}
-
-void surface_exit(struct surface_cb_t * surface_cb) {
-	SurfaceThread * surfaceThread = (SurfaceThread *) surface_cb->priv;
-	surfaceThread->requestExit();
+	return success ? 0 : 1;
 }

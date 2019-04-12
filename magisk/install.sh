@@ -13,6 +13,11 @@ print_modname() {
 }
 
 on_install() {
+  ui_print "- Checking Android version"
+  if [ $API -ge 26 ]; then
+    abort "! Boot animation cannot be replaced with Magisk on Android 8.0 and higher!"
+  fi
+
   ui_print "- Checking libc++ presence"
 
   [ -n "`find /system/lib* -name libc++.so`" ] ||

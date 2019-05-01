@@ -30,6 +30,7 @@ private:
 class String8 {
 public:
 	explicit String8(const char * o);
+
 private:
 	const char * mString;
 };

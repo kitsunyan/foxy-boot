@@ -271,7 +271,7 @@ static int prepare(struct surface_cb_t * surface_cb, NativeWindowType window, fl
 
 int main(int argc, char ** argv) {
 	if (argc >= 2 && !strcmp(argv[1], "ldcheck")) {
-		return 0;
+		return surface_run(NULL);
 	} else {
 		char value[PROPERTY_VALUE_MAX];
 		property_get("debug.sf.nobootanimation", value, "0");

@@ -38,8 +38,6 @@ public:
 
 	static sp<IBinder> getBuiltInDisplay(int32_t id);
 	static status_t getDisplayInfo(const sp<IBinder> & display, DisplayInfo * info);
-	static void openGlobalTransaction();
-	static void closeGlobalTransaction(bool synchronous = false);
 
 private:
 	char reserved[64];

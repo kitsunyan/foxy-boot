@@ -85,8 +85,7 @@ int surface_run(surface_cb_t * surface_cb) {
 		}
 
 		android::Surface * surface = control->getSurface().get();
-		if (surface_cb->gl_prepare(surface_cb, surface, dinfo.density)) {
-			surface_cb->gl_loop(surface_cb);
+		if (surface_cb->callback(surface_cb, surface, dinfo.density)) {
 			success = true;
 		}
 	}

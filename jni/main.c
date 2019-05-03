@@ -15,18 +15,7 @@
 #include <GLES/glext.h>
 
 struct ctx_t {
-	const struct font_t * font;
 	int boot_test;
-
-	int width;
-	int height;
-	int scale;
-	uint32_t background_color;
-	uint32_t foreground_color;
-
-	EGLDisplay display;
-	EGLSurface surface;
-	EGLContext context;
 };
 
 static uint8_t * make_symbol(const struct font_t * font, uint8_t c, int scale,
@@ -52,10 +41,10 @@ static uint8_t * make_symbol(const struct font_t * font, uint8_t c, int scale,
 	return rgba;
 }
 
-static int check_exit(struct ctx_t * ctx) {
+static int check_exit(int boot_test) {
 	char value[PROPERTY_VALUE_MAX];
 	property_get("service.bootanim.exit", value, "0");
-	if (atoi(value) && !ctx->boot_test) {
+	if (atoi(value) && !boot_test) {
 		return 1;
 	}
 	property_get("init.svc.surfaceflinger", value, "stopped");
@@ -106,10 +95,11 @@ static int next_after_date_update(char * date, const char * log, int count) {
 	return lastl;
 }
 
-static void loop(struct surface_cb_t * surface_cb) {
-	struct ctx_t * ctx = surface_cb->data;
-	GLint crop[4] = { 0, ctx->height, ctx->width, -ctx->height };
-	uint8_t * symbols[ctx->font->count];
+static void loop(EGLDisplay display, EGLSurface surface, EGLContext context, int width, int height,
+	int boot_test, int scale, uint32_t background_color, uint32_t foreground_color, const struct font_t * font) {
+	GLint crop[4] = { 0, height, width, -height };
+	int tw, th;
+	uint8_t * symbols[font->count];
 	uint8_t * clear;
 	int log_size;
 	char * log, * lines;
@@ -119,12 +109,12 @@ static void loop(struct surface_cb_t * surface_cb) {
 	int force_render = 1;
 	char last_date[30] = "";
 
-	int tw = 1 << (31 - __builtin_clz(ctx->width));
-	int th = 1 << (31 - __builtin_clz(ctx->height));
-	if (tw < ctx->width) {
+	tw = 1 << (31 - __builtin_clz(width));
+	th = 1 << (31 - __builtin_clz(height));
+	if (tw < width) {
 		tw <<= 1;
 	}
-	if (th < ctx->height) {
+	if (th < height) {
 		th <<= 1;
 	}
 
@@ -143,21 +133,21 @@ static void loop(struct surface_cb_t * surface_cb) {
 	glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, crop);
 
-	for (i = 0; i < ctx->font->count; i++) {
-		symbols[i] = make_symbol(ctx->font, i, ctx->scale,
-			ctx->background_color, ctx->foreground_color);
+	for (i = 0; i < font->count; i++) {
+		symbols[i] = make_symbol(font, i, scale,
+			background_color, foreground_color);
 	}
 	clear = malloc(4 * tw * th);
 	for (i = 0; i < tw * th; i++) {
-		((uint32_t *) clear)[i] = bswap_32(ctx->background_color);
+		((uint32_t *) clear)[i] = bswap_32(background_color);
 	}
 	log_size = klogctl(10, NULL, 0);
 	if (log_size < 16 * 1024) {
 		log_size = 16 * 1024;
 	}
 	log = malloc(log_size);
-	max_line = ctx->width / ctx->font->width / ctx->scale;
-	max_lines = ctx->height / ctx->font->height / ctx->scale;
+	max_line = width / font->width / scale;
+	max_lines = height / font->height / scale;
 	lines = malloc(max_lines * (max_line + 1));
 
 	while (1) {
@@ -195,13 +185,13 @@ static void loop(struct surface_cb_t * surface_cb) {
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, clear);
 			for (i = ring_start, j = 0; i < ring_start + ring_total; i++, j++) {
 				int k = i >= max_lines ? i % max_lines : i;
-				render_line(j, &lines[k * (max_line + 1)], ctx->font, symbols, ctx->scale);
+				render_line(j, &lines[k * (max_line + 1)], font, symbols, scale);
 			}
-			glDrawTexiOES(0, 0, 0, ctx->width, ctx->height);
-			eglSwapBuffers(ctx->display, ctx->surface);
+			glDrawTexiOES(0, 0, 0, width, height);
+			eglSwapBuffers(display, surface);
 		}
 		usleep(20000);
-		if (check_exit(ctx)) {
+		if (check_exit(boot_test)) {
 			break;
 		}
 	}
@@ -209,17 +199,12 @@ static void loop(struct surface_cb_t * surface_cb) {
 	free(clear);
 	free(log);
 	free(lines);
-	for (i = 0; i < ctx->font->count; i++) {
+	for (i = 0; i < font->count; i++) {
 		free(symbols[i]);
 	}
-
-	eglMakeCurrent(ctx->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-	eglDestroyContext(ctx->display, ctx->context);
-	eglDestroySurface(ctx->display, ctx->surface);
-	eglTerminate(ctx->display);
 }
 
-static int prepare(struct surface_cb_t * surface_cb, NativeWindowType window, float density) {
+static int callback(struct surface_cb_t * surface_cb, NativeWindowType window, float density) {
 	struct ctx_t * ctx = surface_cb->data;
 	char value[PROPERTY_VALUE_MAX];
 	int ivalue;
@@ -230,42 +215,49 @@ static int prepare(struct surface_cb_t * surface_cb, NativeWindowType window, fl
 		EGL_DEPTH_SIZE, 0,
 		EGL_NONE
 	};
-	EGLint w, h;
+	EGLint width, height;
 	EGLint numConfigs;
 	EGLConfig config;
 	EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	EGLSurface surface;
 	EGLContext context;
+	int scale;
+	uint32_t background_color;
+	uint32_t foreground_color;
+	const struct font_t * font;
 
 	eglInitialize(display, 0, 0);
 	eglChooseConfig(display, attribs, &config, 1, &numConfigs);
 	surface = eglCreateWindowSurface(display, config, window, NULL);
 	context = eglCreateContext(display, config, NULL, NULL);
-	eglQuerySurface(display, surface, EGL_WIDTH, &w);
-	eglQuerySurface(display, surface, EGL_HEIGHT, &h);
+	eglQuerySurface(display, surface, EGL_WIDTH, &width);
+	eglQuerySurface(display, surface, EGL_HEIGHT, &height);
 
 	if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE) {
 		return 0;
 	}
 
-	ctx->width = w;
-	ctx->height = h;
-
 	property_get("foxy.boot.scale", value, "0");
 	ivalue = atoi(value);
-	ctx->scale = ivalue > 0 && ivalue < 10 ? ivalue : (int) density;
+	scale = ivalue > 0 && ivalue < 10 ? ivalue : (int) density;
 
 	property_get("foxy.boot.background", value, "#000000");
-	ctx->background_color = value[0] == '#' && strlen(value) == 7
+	background_color = value[0] == '#' && strlen(value) == 7
 		? strtol(&value[1], NULL, 16) << 8 | 0xff : 0x000000ff;
 
 	property_get("foxy.boot.foreground", value, "#ffffff");
-	ctx->foreground_color = value[0] == '#' && strlen(value) == 7
+	foreground_color = value[0] == '#' && strlen(value) == 7
 		? strtol(&value[1], NULL, 16) << 8 | 0xff : 0xffffffff;
 
-	ctx->display = display;
-	ctx->surface = surface;
-	ctx->context = context;
+	font = get_font();
+
+	loop(display, surface, context, width, height,
+		ctx->boot_test, scale, background_color, foreground_color, font);
+
+	eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	eglDestroyContext(display, context);
+	eglDestroySurface(display, surface);
+	eglTerminate(display);
 	return 1;
 }
 
@@ -278,11 +270,9 @@ int main(int argc, char ** argv) {
 		if (!atoi(value)) {
 			struct ctx_t ctx;
 			struct surface_cb_t surface_cb = {
-				.gl_prepare = prepare,
-				.gl_loop = loop,
+				.callback = callback,
 				.data = &ctx
 			};
-			ctx.font = get_font();
 			ctx.boot_test = argc >= 2 && !strcmp(argv[1], "test");
 			return surface_run(&surface_cb);
 		}

@@ -8,8 +8,7 @@ extern "C" {
 #endif
 
 struct surface_cb_t {
-	int (* gl_prepare)(struct surface_cb_t * surface_cb, NativeWindowType window, float density);
-	void (* gl_loop)(struct surface_cb_t * surface_cb);
+	int (* callback)(struct surface_cb_t * surface_cb, NativeWindowType window, float density);
 	void * data;
 };
 

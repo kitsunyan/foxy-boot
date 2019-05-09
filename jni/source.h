@@ -9,10 +9,16 @@ struct ring_t {
 	char * lines;
 };
 
+char * ring_current(struct ring_t * ring);
+void ring_increment(struct ring_t * ring);
+
 void source_kmsg(struct ring_t * ring, void * data,
 	void (* callback)(struct ring_t *, void *), int (* check_exit)(void *));
 
 void source_logd(struct ring_t * ring, void * data,
+	void (* callback)(struct ring_t *, void *), int (* check_exit)(void *));
+
+void source_unknown(struct ring_t * ring, void * data,
 	void (* callback)(struct ring_t *, void *), int (* check_exit)(void *));
 
 #endif

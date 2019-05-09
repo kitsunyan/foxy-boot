@@ -1,6 +1,6 @@
 # Foxy Boot
 
-Android boot animation replacement which displays the kernel ring buffer.
+Android boot animation replacement which displays the kernel ring buffer or Android log.
 
 ![Screenshot](https://user-images.githubusercontent.com/24494863/55270348-a4343380-5295-11e9-8bbe-aa6e65546ea4.png)
 
@@ -12,6 +12,7 @@ These values can be changed using the following system properties:
 * `foxy.boot.scale` — scale factor, can take integer values from 1 to 9
 * `foxy.boot.background` ­— background color in hex format (e.g. #000000)
 * `foxy.boot.foreground` ­— foreground color in hex format (e.g. #ffffff)
+* `foxy.boot.source` ­— message source (`kmsg` for the kernel ring buffer or `logd` for Android log)
 
 These properties can be changed using init shell script. For instance, you can create `foxy-boot.sh` in
 `/sbin/.magisk/img/.core/post-fs-data.d` (don't forget to make it executable via `chmod a+x`) with the following
@@ -21,6 +22,7 @@ commands:
 resetprop 'foxy.boot.scale' 2
 resetprop 'foxy.boot.background' '#ffffff'
 resetprop 'foxy.boot.foreground' '#000000'
+resetprop 'foxy.boot.source' 'logd'
 ```
 
 ## ABI and Linking Issues

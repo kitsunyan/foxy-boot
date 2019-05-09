@@ -71,15 +71,10 @@ void source_kmsg(struct ring_t * ring, void * data,
 				new_line = i > 0 && log[i - 1] == '\n';
 				copy_count = i - start - (new_line ? 1 : 0);
 				if (copy_count > 0) {
-					char * target = &ring->lines[(ring->total < ring->height
-						? ring->total : ring->start) * ring->width];
+					char * target = ring_current(ring);
 					memcpy(target, &log[start], copy_count);
 					target[copy_count] = '\0';
-					if (ring->total >= ring->height) {
-						ring->start = (ring->start + 1) % ring->height;
-					} else {
-						ring->total++;
-					}
+					ring_increment(ring);
 				}
 			}
 		}

@@ -118,18 +118,13 @@ void source_logd(struct ring_t * ring, void * data,
 				for (i = start; i < size; i++) {
 					int new_line = buffer[i] == '\n';
 					if (i - from == ring->width - 1 - time_size - 1 || new_line || i == size - 1) {
-						char * target = &ring->lines[(ring->total < ring->height
-							? ring->total : ring->start) * ring->width];
+						char * target = ring_current(ring);
 						int copy_count = i - from + (new_line ? 0 : 1);
 						if (copy_count > 0) {
 							memcpy(target, time, time_size);
 							memcpy(&target[time_size], &buffer[from], copy_count);
 							target[time_size + copy_count] = '\0';
-							if (ring->total >= ring->height) {
-								ring->start = (ring->start + 1) % ring->height;
-							} else {
-								ring->total++;
-							}
+							ring_increment(ring);
 						}
 						from = i + 1;
 						time_size = new_line ? strlen(time) : 0;

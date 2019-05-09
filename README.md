@@ -1,6 +1,6 @@
 # Foxy Boot
 
-Android boot animation replacement which displays the kernel ring buffer.
+Android boot animation replacement which displays the kernel ring buffer or Android log.
 
 ## User Documentation
 

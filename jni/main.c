@@ -29,6 +29,12 @@ struct source_context_t {
 	uint8_t * clear;
 };
 
+enum message_source_t {
+	MESSAGE_SOURCE_KMSG,
+	MESSAGE_SOURCE_LOGD,
+	MESSAGE_SOURCE_UNKNOWN
+};
+
 static uint8_t * make_symbol(const struct font_t * font, uint8_t c, int scale,
 	uint32_t background_color, uint32_t foreground_color) {
 	int xwb = FONT_WIDTH_BYTES(font->width);
@@ -92,7 +98,8 @@ static int source_check_exit(void * data) {
 }
 
 static void loop(EGLDisplay display, EGLSurface surface, int width, int height,
-	int boot_test, int scale, uint32_t background_color, uint32_t foreground_color, const struct font_t * font) {
+	int boot_test, int scale, uint32_t background_color, uint32_t foreground_color,
+	const struct font_t * font, enum message_source_t message_source) {
 	GLint crop[4] = { 0, height, width, -height };
 	struct ring_t ring;
 	struct source_context_t context = {
@@ -146,7 +153,20 @@ static void loop(EGLDisplay display, EGLSurface surface, int width, int height,
 	ring.start = 0;
 	ring.lines = malloc(ring.width * ring.height);
 
-	source_logd(&ring, &context, source_callback, source_check_exit);
+	switch (message_source) {
+		case MESSAGE_SOURCE_KMSG: {
+			source_kmsg(&ring, &context, source_callback, source_check_exit);
+			break;
+		}
+		case MESSAGE_SOURCE_LOGD: {
+			source_logd(&ring, &context, source_callback, source_check_exit);
+			break;
+		}
+		default: {
+			source_unknown(&ring, &context, source_callback, source_check_exit);
+			break;
+		}
+	}
 
 	free(ring.lines);
 	free(context.clear);
@@ -177,6 +197,7 @@ static int surface_callback(struct surface_cb_t * surface_cb, NativeWindowType w
 	uint32_t background_color;
 	uint32_t foreground_color;
 	const struct font_t * font;
+	enum message_source_t message_source;
 
 	eglInitialize(display, 0, 0);
 	eglChooseConfig(display, attribs, &config, 1, &numConfigs);
@@ -201,10 +222,20 @@ static int surface_callback(struct surface_cb_t * surface_cb, NativeWindowType w
 	foreground_color = value[0] == '#' && strlen(value) == 7
 		? strtol(&value[1], NULL, 16) << 8 | 0xff : 0xffffffff;
 
+	property_get("foxy.boot.source", value, "kmsg");
+	if (!strcmp(value, "kmsg")) {
+		message_source = MESSAGE_SOURCE_KMSG;
+	} else if (!strcmp(value, "logd")) {
+		message_source = MESSAGE_SOURCE_LOGD;
+	} else {
+		message_source = MESSAGE_SOURCE_UNKNOWN;
+	}
+
 	font = get_font();
 
 	loop(display, surface, width, height,
-		context->boot_test, scale, background_color, foreground_color, font);
+		context->boot_test, scale, background_color, foreground_color,
+		font, message_source);
 
 	eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 	eglDestroyContext(display, eglcontext);

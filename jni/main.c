@@ -1,21 +1,32 @@
 #include "font.h"
+#include "source.h"
 #include "surface.h"
 
-#include <dlfcn.h>
-
 #include <byteswap.h>
-#include <sys/klog.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <android/cutils.h>
 
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 
-struct ctx_t {
+struct surface_context_t {
 	int boot_test;
+};
+
+struct source_context_t {
+	EGLDisplay display;
+	EGLSurface surface;
+	int width;
+	int height;
+	int boot_test;
+	int scale;
+	const struct font_t * font;
+	int tw;
+	int th;
+	uint8_t ** symbols;
+	uint8_t * clear;
 };
 
 static uint8_t * make_symbol(const struct font_t * font, uint8_t c, int scale,
@@ -63,59 +74,45 @@ static void render_line(int line, const char * text, const struct font_t * font,
 	}
 }
 
-static int next_after_date_update(char * date, const char * log, int count) {
-	int new_date = -1;
-	int lastl = -1;
-	int lastc = -1;
-	int datel = strlen(date);
-	int i;
-	for (i = count - 1; i >= 0; i--) {
-		if (log[i] == ']') {
-			lastc = i + 1;
-		} else if ((log[i] == '<' || log[i] == '[') && (i == 0 || log[i - 1] == '\n') && lastc > i) {
-			if (lastc - i == datel && !strncmp(&log[i], date, datel)) {
-				break;
-			} else {
-				lastl = i;
-				if (new_date < 0) {
-					new_date = i;
-				}
-			}
-		}
+static void source_callback(struct ring_t * ring, void * data) {
+	struct source_context_t * context = data;
+	int i, j, k;
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, context->tw, context->th, 0, GL_RGBA, GL_UNSIGNED_BYTE, context->clear);
+	for (i = ring->start, j = 0; i < ring->start + ring->total; i++, j++) {
+		k = i >= ring->height ? i % ring->height : i;
+		render_line(j, &ring->lines[k * ring->width], context->font, context->symbols, context->scale);
 	}
-	if (new_date >= 0) {
-		if (datel == 0) {
-			lastl = -1;
-		}
-		i = new_date;
-		while (log[i++] != ']');
-		memcpy(date, &log[new_date], i - new_date);
-		date[i - new_date] = '\0';
-	}
-	return lastl;
+	glDrawTexiOES(0, 0, 0, context->width, context->height);
+	eglSwapBuffers(context->display, context->surface);
 }
 
-static void loop(EGLDisplay display, EGLSurface surface, EGLContext context, int width, int height,
+static int source_check_exit(void * data) {
+	struct source_context_t * context = data;
+	return check_exit(context->boot_test);
+}
+
+static void loop(EGLDisplay display, EGLSurface surface, int width, int height,
 	int boot_test, int scale, uint32_t background_color, uint32_t foreground_color, const struct font_t * font) {
 	GLint crop[4] = { 0, height, width, -height };
-	int tw, th;
-	uint8_t * symbols[font->count];
-	uint8_t * clear;
-	int log_size;
-	char * log, * lines;
-	int i, max_line, max_lines;
-	int ring_start = 0;
-	int ring_total = 0;
-	int force_render = 1;
-	char last_date[30] = "";
+	struct ring_t ring;
+	struct source_context_t context = {
+		.display = display,
+		.surface = surface,
+		.width = width,
+		.height = height,
+		.boot_test = boot_test,
+		.scale = scale,
+		.font = font
+	};
+	int i;
 
-	tw = 1 << (31 - __builtin_clz(width));
-	th = 1 << (31 - __builtin_clz(height));
-	if (tw < width) {
-		tw <<= 1;
+	context.tw = 1 << (31 - __builtin_clz(width));
+	context.th = 1 << (31 - __builtin_clz(height));
+	if (context.tw < width) {
+		context.tw <<= 1;
 	}
-	if (th < height) {
-		th <<= 1;
+	if (context.th < height) {
+		context.th <<= 1;
 	}
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -133,79 +130,34 @@ static void loop(EGLDisplay display, EGLSurface surface, EGLContext context, int
 	glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, crop);
 
+	context.symbols = malloc(sizeof(context.symbols) * font->count);
 	for (i = 0; i < font->count; i++) {
-		symbols[i] = make_symbol(font, i, scale,
+		context.symbols[i] = make_symbol(font, i, scale,
 			background_color, foreground_color);
 	}
-	clear = malloc(4 * tw * th);
-	for (i = 0; i < tw * th; i++) {
-		((uint32_t *) clear)[i] = bswap_32(background_color);
-	}
-	log_size = klogctl(10, NULL, 0);
-	if (log_size < 16 * 1024) {
-		log_size = 16 * 1024;
-	}
-	log = malloc(log_size);
-	max_line = width / font->width / scale;
-	max_lines = height / font->height / scale;
-	lines = malloc(max_lines * (max_line + 1));
-
-	while (1) {
-		int count = klogctl(3, log, log_size);
-		int render;
-		i = count > 0 ? next_after_date_update(last_date, log, count) : -1;
-		render = i >= 0 || force_render;
-		force_render = 0;
-		if (i >= 0) {
-			int new_line = 1;
-			while (i < count) {
-				int start;
-				int copy_count;
-				if (new_line && log[i] == '<') {
-					while (log[i++] != '>' && i < count);
-				}
-				start = i;
-				while (log[i++] != '\n' && i < count && i - start < max_line);
-				new_line = i > 0 && log[i - 1] == '\n';
-				copy_count = i - start - (new_line ? 1 : 0);
-				if (copy_count > 0) {
-					char * target = &lines[(ring_total < max_lines ? ring_total : ring_start) * (max_line + 1)];
-					memcpy(target, &log[start], copy_count);
-					target[copy_count] = '\0';
-					if (ring_total >= max_lines) {
-						ring_start = (ring_start + 1) % max_lines;
-					} else {
-						ring_total++;
-					}
-				}
-			}
-		}
-		if (render) {
-			int j;
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, clear);
-			for (i = ring_start, j = 0; i < ring_start + ring_total; i++, j++) {
-				int k = i >= max_lines ? i % max_lines : i;
-				render_line(j, &lines[k * (max_line + 1)], font, symbols, scale);
-			}
-			glDrawTexiOES(0, 0, 0, width, height);
-			eglSwapBuffers(display, surface);
-		}
-		usleep(20000);
-		if (check_exit(boot_test)) {
-			break;
-		}
+	context.clear = malloc(4 * context.tw * context.th);
+	for (i = 0; i < context.tw * context.th; i++) {
+		((uint32_t *) context.clear)[i] = bswap_32(background_color);
 	}
 
-	free(clear);
-	free(log);
-	free(lines);
+	ring.width = width / font->width / scale + 1;
+	ring.height = height / font->height / scale;
+	ring.total = 0;
+	ring.start = 0;
+	ring.lines = malloc(ring.width * ring.height);
+
+	source_kmsg(&ring, &context, source_callback, source_check_exit);
+
+	free(ring.lines);
+	free(context.clear);
 	for (i = 0; i < font->count; i++) {
-		free(symbols[i]);
+		free(context.symbols[i]);
 	}
+	free(context.symbols);
 }
 
-static int callback(struct surface_cb_t * surface_cb, NativeWindowType window, float density) {
-	struct ctx_t * ctx = surface_cb->data;
+static int surface_callback(struct surface_cb_t * surface_cb, NativeWindowType window, float density) {
+	struct surface_context_t * context = surface_cb->data;
 	char value[PROPERTY_VALUE_MAX];
 	int ivalue;
 	const EGLint attribs[] = {
@@ -220,7 +172,7 @@ static int callback(struct surface_cb_t * surface_cb, NativeWindowType window, f
 	EGLConfig config;
 	EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	EGLSurface surface;
-	EGLContext context;
+	EGLContext eglcontext;
 	int scale;
 	uint32_t background_color;
 	uint32_t foreground_color;
@@ -229,11 +181,11 @@ static int callback(struct surface_cb_t * surface_cb, NativeWindowType window, f
 	eglInitialize(display, 0, 0);
 	eglChooseConfig(display, attribs, &config, 1, &numConfigs);
 	surface = eglCreateWindowSurface(display, config, window, NULL);
-	context = eglCreateContext(display, config, NULL, NULL);
+	eglcontext = eglCreateContext(display, config, NULL, NULL);
 	eglQuerySurface(display, surface, EGL_WIDTH, &width);
 	eglQuerySurface(display, surface, EGL_HEIGHT, &height);
 
-	if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE) {
+	if (eglMakeCurrent(display, surface, surface, eglcontext) == EGL_FALSE) {
 		return 0;
 	}
 
@@ -251,11 +203,11 @@ static int callback(struct surface_cb_t * surface_cb, NativeWindowType window, f
 
 	font = get_font();
 
-	loop(display, surface, context, width, height,
-		ctx->boot_test, scale, background_color, foreground_color, font);
+	loop(display, surface, width, height,
+		context->boot_test, scale, background_color, foreground_color, font);
 
 	eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-	eglDestroyContext(display, context);
+	eglDestroyContext(display, eglcontext);
 	eglDestroySurface(display, surface);
 	eglTerminate(display);
 	return 1;
@@ -268,12 +220,12 @@ int main(int argc, char ** argv) {
 		char value[PROPERTY_VALUE_MAX];
 		property_get("debug.sf.nobootanimation", value, "0");
 		if (!atoi(value)) {
-			struct ctx_t ctx;
+			struct surface_context_t context;
 			struct surface_cb_t surface_cb = {
-				.callback = callback,
-				.data = &ctx
+				.callback = surface_callback,
+				.data = &context
 			};
-			ctx.boot_test = argc >= 2 && !strcmp(argv[1], "test");
+			context.boot_test = argc >= 2 && !strcmp(argv[1], "test");
 			return surface_run(&surface_cb);
 		}
 		return 0;

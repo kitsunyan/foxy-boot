@@ -146,7 +146,7 @@ static void loop(EGLDisplay display, EGLSurface surface, int width, int height,
 	ring.start = 0;
 	ring.lines = malloc(ring.width * ring.height);
 
-	source_kmsg(&ring, &context, source_callback, source_check_exit);
+	source_logd(&ring, &context, source_callback, source_check_exit);
 
 	free(ring.lines);
 	free(context.clear);

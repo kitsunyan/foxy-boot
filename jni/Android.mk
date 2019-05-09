@@ -17,7 +17,7 @@ LOCAL_SRC_FILES := android/utils.cpp
 include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
-LOCAL_SRC_FILES := font.c source-kmsg.c surface.cpp main.c
+LOCAL_SRC_FILES := font.c source-kmsg.c source-logd.c surface.cpp main.c
 LOCAL_C_INCLUDES := jni/android
 LOCAL_CFLAGS := -DGL_GLEXT_PROTOTYPES -Wall -Wextra -Wno-unused-parameter
 LOCAL_SHARED_LIBRARIES := cutils gui utils

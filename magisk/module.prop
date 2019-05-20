@@ -1,7 +1,7 @@
 id=foxy-boot
 name=Foxy Boot
-version=1.3
-versionCode=4
+version=1.4
+versionCode=5
 author=kitsunyan
-description=Display the kernel ring buffer instead of a boot animation
+description=Replace Android boot animation with the kernel ring buffer or Android log
 support=https://github.com/kitsunyan/foxy-boot

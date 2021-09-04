@@ -15,7 +15,7 @@ These values can be changed using the following system properties:
 * `foxy.boot.source` ­— message source (`kmsg` for the kernel ring buffer or `logd` for Android log)
 
 These properties can be changed using init shell script. For instance, you can create `foxy-boot.sh` in
-`/sbin/.magisk/img/.core/post-fs-data.d` (don't forget to make it executable via `chmod a+x`) with the following
+`/data/adb/post-fs-data.d` (don't forget to make it executable via `chmod a+x`) with the following
 commands:
 
 ```sh
